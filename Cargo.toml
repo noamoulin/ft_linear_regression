@@ -1,0 +1,16 @@
+[package]
+name = "ft_linear_regression"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+csv = "1.3.0"
+plotters = "0.3.5"
+
+[[bin]]
+name = "predictor"
+path = "src/predictor.rs"
+
+[[bin]]
+name = "trainer"
+path = "src/trainer.rs"
