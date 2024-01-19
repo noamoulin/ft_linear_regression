@@ -3,22 +3,25 @@
 /*                                                        :::      ::::::::   */
 /*   trainer.rs                                         :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
-/*   By: noa <noa@student.42.fr>                    +#+  +:+       +#+        */
+/*   By: nomoulin <nomoulin@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2024/01/18 13:18:17 by noa               #+#    #+#             */
-/*   Updated: 2024/01/18 20:17:25 by noa              ###   ########.fr       */
+/*   Updated: 2024/01/19 02:35:55 by nomoulin         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
-use std::{fs::File, error::Error, fmt};
+use std::{fs::File, error::Error, fmt, env};
 use csv::{ReaderBuilder, StringRecord};
 use plotters::prelude::*;
 
 struct DataSet {
+    x_or: Vec<f64>,
+    y_or: Vec<f64>,
     x: Vec<f64>,
     y: Vec<f64>,
     x_name: String,
-    y_name: String
+    y_name: String,
+    max: f64
 }
 #[derive(Debug)]
 enum DataSetError {
@@ -69,7 +72,8 @@ impl DataSet {
             x.push(raw[0].parse::<f64>().map_err(|_| DataSetError::NonNumericValue)?);
             y.push(raw[1].parse::<f64>().map_err(|_| DataSetError::NonNumericValue)?);
         }
-        Ok(DataSet {x: x, y: y, x_name: labels[0].to_string(), y_name: labels[1].to_string()})
+        let (xn, yn, max) = normalized_vectors(&x, &y);
+        Ok(DataSet {max: max, x_or: x, y_or: y, x: xn, y: yn, x_name: labels[0].to_string(), y_name: labels[1].to_string()})
     }
 }
 
@@ -77,13 +81,11 @@ impl<'a> Model<'a> {
     fn new(dataset: &DataSet) -> Model {
         Model {data: dataset, a: 0., b: 0.}
     }
-    fn display(&self) {
-        let name = self.data.y_name.clone() + " vs " + self.data.x_name.as_str();
-        let file_name = name.clone().replace(" ", "_") + ".png";
-        let data_x = &self.data.x;
-        let data_y = &self.data.y;
-        let (width, height) = (800, 600);
-        let backend = BitMapBackend::new(file_name.as_str(), (width, height))
+    fn plot(&self, path: &str, width: u32, height: u32) {
+        let chart_name = self.data.y_name.clone() + " vs " + self.data.x_name.as_str();
+        let data_x = &self.data.x_or;
+        let data_y = &self.data.y_or;
+        let backend = BitMapBackend::new(path, (width, height))
             .into_drawing_area();
         backend.fill(&WHITE).unwrap();
     
@@ -93,7 +95,7 @@ impl<'a> Model<'a> {
         let y_max = *data_y.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
     
         let mut chart = ChartBuilder::on(&backend)
-            .caption(name.clone().as_str(), ("helvetica", 20))
+            .caption(chart_name, ("helvetica", 20))
             .x_label_area_size(40)
             .y_label_area_size(40)
             .margin(5)
@@ -120,13 +122,21 @@ impl<'a> Model<'a> {
         nabla(|x, y| self.mean_error(x, y), self.a, self.b)
     }
 
-    fn train(&mut self, n_epochs: u32) {
-        let learning_rate = 0.001;
-        for _ in 0..n_epochs {
+    fn train(&mut self, d_rms: f64) {
+        let learning_rate = 0.01;
+        let mut previous_error = self.mean_error(self.a, self.b);
+        loop {
             let grad = self.error_gradient();
             self.a -= grad.0 * learning_rate;
             self.b -= grad.1 * learning_rate;
+
+            let error = self.mean_error(self.a, self.b);
+            if previous_error - error < d_rms {
+                break;
+            }
+            previous_error = error;
         }
+        self.b *= self.data.max;
     }
 }
 
@@ -142,30 +152,28 @@ where
     (df_dx, df_dy)
 }
 
-fn normalize_vectors_together(vec1: &mut Vec<f64>, vec2: &mut Vec<f64>) {
-    if vec1.is_empty() || vec2.is_empty() || vec1.len() != vec2.len() {
-        return; // Les vecteurs doivent avoir la même taille et ne pas être vides
+fn normalized_vectors(a: &Vec<f64>, b: &Vec<f64>) -> (Vec<f64>, Vec<f64>, f64) {
+    let maxabs_a = *a.iter().max_by(|a, b| a.abs().partial_cmp(&b.abs()).unwrap()).unwrap();
+    let maxabs_b = *b.iter().max_by(|a, b| a.abs().partial_cmp(&b.abs()).unwrap()).unwrap();
+    let max: f64 = if maxabs_a > maxabs_b {
+        maxabs_a
     }
-
-    // Trouver les valeurs minimales et maximales combinées des deux vecteurs
-    let min_val_combined = *vec1.iter().chain(vec2.iter()).min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
-    let max_val_combined = *vec1.iter().chain(vec2.iter()).max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
-
-    // Normaliser chaque élément des deux vecteurs en utilisant les statistiques combinées
-    for (val1, val2) in vec1.iter_mut().zip(vec2.iter_mut()) {
-        *val1 = -1.0 + 2.0 * (*val1 - min_val_combined) / (max_val_combined - min_val_combined);
-        *val2 = -1.0 + 2.0 * (*val2 - min_val_combined) / (max_val_combined - min_val_combined);
-    }
+    else {
+        maxabs_b
+    };
+    (a.into_iter().map(|elm| elm / max).collect(), b.into_iter().map(|elm| elm / max).collect(), max)
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let mut dataset = DataSet::new("/home/noa/ft_linear_regression/data/data.csv")?;
-    normalize_vectors_together(&mut dataset.x, &mut dataset.y);
+    let args: Vec<String> = env::args().collect();
+    let dataset = DataSet::new(args[1].as_str())?;
+    let width = args[3].parse::<u32>().unwrap();
+    let height = args[4].parse::<u32>().unwrap();
+
     let mut model = Model::new(&dataset);
+    model.train(1e-10);
+    model.plot(args[2].as_str(), width, height);
 
-    model.train(10000);
-    model.display();
-
-    println!("{}, {}", model.a, model.b);
+    println!("y = {}x, + {}", model.a, model.b);
     Ok(())
 }
