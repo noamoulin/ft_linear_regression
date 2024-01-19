@@ -3,16 +3,16 @@
 /*                                                        :::      ::::::::   */
 /*   trainer.rs                                         :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
-/*   By: nomoulin <nomoulin@student.42.fr>          +#+  +:+       +#+        */
+/*   By: noa <noa@student.42.fr>                    +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2024/01/18 13:18:17 by noa               #+#    #+#             */
-/*   Updated: 2024/01/19 02:35:55 by nomoulin         ###   ########.fr       */
+/*   Updated: 2024/01/19 17:36:57 by noa              ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
-use std::{fs::File, error::Error, fmt, env};
 use csv::{ReaderBuilder, StringRecord};
 use plotters::prelude::*;
+use std::{env, error::Error, fmt, fs::File};
 
 struct DataSet {
     x_or: Vec<f64>,
@@ -21,12 +21,12 @@ struct DataSet {
     y: Vec<f64>,
     x_name: String,
     y_name: String,
-    max: f64
+    max: f64,
 }
 #[derive(Debug)]
 enum DataSetError {
     NonNumericValue,
-    InvalidColumnCount
+    InvalidColumnCount,
 }
 
 impl fmt::Display for DataSetError {
@@ -42,7 +42,7 @@ impl Error for DataSetError {}
 struct Model<'a> {
     data: &'a DataSet,
     a: f64,
-    b: f64
+    b: f64,
 }
 
 impl DataSet {
@@ -57,7 +57,7 @@ impl DataSet {
             return Err(Box::new(DataSetError::InvalidColumnCount));
         };
         if labels.len() != 2 {
-            return Err(Box::new(DataSetError::InvalidColumnCount))
+            return Err(Box::new(DataSetError::InvalidColumnCount));
         };
 
         let mut x: Vec<f64> = vec![];
@@ -73,27 +73,34 @@ impl DataSet {
             y.push(raw[1].parse::<f64>().map_err(|_| DataSetError::NonNumericValue)?);
         }
         let (xn, yn, max) = normalized_vectors(&x, &y);
-        Ok(DataSet {max: max, x_or: x, y_or: y, x: xn, y: yn, x_name: labels[0].to_string(), y_name: labels[1].to_string()})
+        Ok(DataSet {
+            max,
+            x_or: x,
+            y_or: y,
+            x: xn,
+            y: yn,
+            x_name: labels[0].to_string(),
+            y_name: labels[1].to_string(),
+        })
     }
 }
 
 impl<'a> Model<'a> {
     fn new(dataset: &DataSet) -> Model {
-        Model {data: dataset, a: 0., b: 0.}
+        Model { data: dataset, a: 0., b: 0. }
     }
     fn plot(&self, path: &str, width: u32, height: u32) {
         let chart_name = self.data.y_name.clone() + " vs " + self.data.x_name.as_str();
         let data_x = &self.data.x_or;
         let data_y = &self.data.y_or;
-        let backend = BitMapBackend::new(path, (width, height))
-            .into_drawing_area();
+        let backend = BitMapBackend::new(path, (width, height)).into_drawing_area();
         backend.fill(&WHITE).unwrap();
-    
+
         let x_min = *data_x.iter().min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
         let x_max = *data_x.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
         let y_min = *data_y.iter().min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
         let y_max = *data_y.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
-    
+
         let mut chart = ChartBuilder::on(&backend)
             .caption(chart_name, ("helvetica", 20))
             .x_label_area_size(40)
@@ -101,21 +108,21 @@ impl<'a> Model<'a> {
             .margin(5)
             .build_cartesian_2d(x_min..x_max, y_min..y_max)
             .unwrap();
-    
-        chart.draw_series(
-            data_x.iter().zip(data_y.iter()).map(|(x, y)| Circle::new((*x, *y), 5, RED.filled())),
-        ).unwrap();
 
-        chart.draw_series(LineSeries::new(
-            [x_min, x_max].map(|x| (x as f64, self.a * x as f64 + self.b)),
-            &BLUE,
-        )).unwrap();
+        chart
+            .draw_series(data_x.iter().zip(data_y.iter()).map(|(x, y)| Circle::new((*x, *y), 3, RED.filled())))
+            .unwrap();
+
+        chart
+            .draw_series(LineSeries::new([x_min, x_max].map(|x| (x as f64, self.a * x as f64 + self.b)), &BLUE))
+            .unwrap();
 
         chart.configure_mesh().x_desc(self.data.x_name.clone()).y_desc(self.data.y_name.clone()).draw().unwrap();
     }
 
     fn mean_error(&self, a: f64, b: f64) -> f64 {
-        self.data.x.iter().zip(self.data.y.iter()).map(|(x, y)| (a * x + b - y).powf(2.)).sum::<f64>() / (self.data.x.len() as f64)
+        self.data.x.iter().zip(self.data.y.iter()).map(|(x, y)| (a * x + b - y).powf(2.)).sum::<f64>()
+            / (self.data.x.len() as f64)
     }
 
     fn error_gradient(&self) -> (f64, f64) {
@@ -142,10 +149,10 @@ impl<'a> Model<'a> {
 
 fn nabla<F>(f: F, x: f64, y: f64) -> (f64, f64)
 where
-    F: Fn (f64, f64) -> f64,
+    F: Fn(f64, f64) -> f64,
 {
     let h = 1e-10;
-    
+
     let df_dx = (f(x + h, y) - f(x, y)) / h;
     let df_dy = (f(x, y + h) - f(x, y)) / h;
 
@@ -155,12 +162,7 @@ where
 fn normalized_vectors(a: &Vec<f64>, b: &Vec<f64>) -> (Vec<f64>, Vec<f64>, f64) {
     let maxabs_a = *a.iter().max_by(|a, b| a.abs().partial_cmp(&b.abs()).unwrap()).unwrap();
     let maxabs_b = *b.iter().max_by(|a, b| a.abs().partial_cmp(&b.abs()).unwrap()).unwrap();
-    let max: f64 = if maxabs_a > maxabs_b {
-        maxabs_a
-    }
-    else {
-        maxabs_b
-    };
+    let max: f64 = if maxabs_a > maxabs_b { maxabs_a } else { maxabs_b };
     (a.into_iter().map(|elm| elm / max).collect(), b.into_iter().map(|elm| elm / max).collect(), max)
 }
 

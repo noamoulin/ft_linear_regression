@@ -7,9 +7,6 @@ edition = "2021"
 csv = "1.3.0"
 plotters = "0.3.5"
 
-[[bin]]
-name = "predictor"
-path = "src/predictor.rs"
 
 [[bin]]
 name = "trainer"
